@@ -64,12 +64,19 @@ public class EventPublishingRunListener implements SpringApplicationRunListener,
 		return 0;
 	}
 
+	/**
+	 *将应用启动事件发布给SpringApplication 的listener进行处理，每个listener根据应用的不同阶段处理不同的事情
+	 */
 	@Override
 	public void starting() {
 		this.initialMulticaster.multicastEvent(
 				new ApplicationStartingEvent(this.application, this.args));
 	}
 
+	/**
+	 * bootStrapApplicationListener(在spring-cloud-context包中,目前git上找不到源码，无法写注释) 触发xml的bean加载校验
+	 * @param environment the environment
+	 */
 	@Override
 	public void environmentPrepared(ConfigurableEnvironment environment) {
 		this.initialMulticaster.multicastEvent(new ApplicationEnvironmentPreparedEvent(

@@ -259,18 +259,67 @@ public class SpringApplication {
 	 * @see #run(Class, String[])
 	 * @see #setSources(Set)
 	 */
+	/**
+	 * springApplication 初始化，加载Listener（应用启动监听，根据应用启动的各个阶级的事件，分别做不同的事情）、
+	 * Initializer（初始化处理工具类）
+	 * @param resourceLoader
+	 * @param primarySources
+	 */
 	@SuppressWarnings({ "unchecked", "rawtypes" })
 	public SpringApplication(ResourceLoader resourceLoader, Class<?>... primarySources) {
-		this.resourceLoader = resourceLoader;
+		this.resourceLoader = resourceLoader;//资源加载器，此处为null
 		Assert.notNull(primarySources, "PrimarySources must not be null");
+		//当前启动的应该主类
 		this.primarySources = new LinkedHashSet<>(Arrays.asList(primarySources));
 		this.webApplicationType = WebApplicationType.deduceFromClasspath();
+		/**
+		 * Initializers 和 Listeners都是使用getSpringFactoriesInstances方法加载，只是传入的class不一样
+		 * 根据传入的class 对象进行装载
+		 */
+
+		/**
+		 * getSpringFactoriesInstances 传的是ApplicationContextInitializer.class ,
+		 * 实例化得到的对象包括：
+		 0 = "org.springframework.boot.context.ConfigurationWarningsApplicationContextInitializer"
+		 1 = "org.springframework.boot.context.ContextIdApplicationContextInitializer"
+		 2 = "org.springframework.boot.context.config.DelegatingApplicationContextInitializer"
+		 3 = "org.springframework.boot.context.embedded.ServerPortInfoApplicationContextInitializer"
+		 4 = "org.springframework.boot.autoconfigure.SharedMetadataReaderFactoryContextInitializer"
+		 5 = "org.springframework.boot.autoconfigure.logging.AutoConfigurationReportLoggingInitializer"
+		 */
 		setInitializers((Collection) getSpringFactoriesInstances(
 				ApplicationContextInitializer.class));
+
+		/**
+		 *  getSpringFactoriesInstances 传的是ApplicationListener.class ,
+		 *  实例化得到的对象包括：
+		 0 = "org.springframework.boot.ClearCachesApplicationListener"  监听事件清除缓存
+		 1 = "org.springframework.boot.builder.ParentContextCloserApplicationListener"
+		 2 = "org.springframework.boot.context.FileEncodingApplicationListener" 检查文件编码
+		 3 = "org.springframework.boot.context.config.AnsiOutputApplicationListener"
+		 4 = "org.springframework.boot.context.config.ConfigFileApplicationListener" 检查配置文件
+		 5 = "org.springframework.boot.context.config.DelegatingApplicationListener"
+		 6 = "org.springframework.boot.liquibase.LiquibaseServiceLocatorApplicationListener"
+		 7 = "org.springframework.boot.logging.ClasspathLoggingApplicationListener"
+		 8 = "org.springframework.boot.logging.LoggingApplicationListener" 初始化日志控件
+		 9 = "org.springframework.boot.autoconfigure.BackgroundPreinitializer"
+		 10 = "org.springframework.cloud.bootstrap.BootstrapApplicationListener" 重点：配置读取、xml中的 bean definition加载、校验等重要工作
+		 11 = "org.springframework.cloud.bootstrap.LoggingSystemShutdownListener"
+		 12 = "org.springframework.cloud.context.restart.RestartListener"
+		 * 这些listener会在应用启动的时候做响应的事情
+		 */
 		setListeners((Collection) getSpringFactoriesInstances(ApplicationListener.class));
+
+		/**
+		 * 获取main函数入口类
+		 */
 		this.mainApplicationClass = deduceMainApplicationClass();
 	}
 
+	/**
+	 * 根据当前执行的线程栈（获取函数调用链），获取到main函数入口类
+	 * @return
+	 */
 	private Class<?> deduceMainApplicationClass() {
 		try {
 			StackTraceElement[] stackTrace = new RuntimeException().getStackTrace();
@@ -292,19 +341,45 @@ public class SpringApplication {
 	 * @param args the application arguments (usually passed from a Java main method)
 	 * @return a running {@link ApplicationContext}
 	 */
+	/**
+	 * 初始化SpringApplication 后，run开始启动。run 函数会被触发执行两次
+	 * 第一次:listeners中触发 bootStrapApplicationListener 创建新的SpringApplication实例，
+	 * 该实例创建 AnnotationConfigApplicationContext 并创建各种postProcessor，老版本在finishBeanFactoryInitialization触发，
+	 * 目前这个新版本还未确定
+	 *
+	 * 第二次：当前SpringApplication实例的调用，在
+	 * @param args
+	 * @return
+	 */
 	public ConfigurableApplicationContext run(String... args) {
-		StopWatch stopWatch = new StopWatch();
+		StopWatch stopWatch = new StopWatch();// 用start stop来获取应用启动消耗的时间
 		stopWatch.start();
 		ConfigurableApplicationContext context = null;
 		Collection<SpringBootExceptionReporter> exceptionReporters = new ArrayList<>();
+		/**
+		 * 设置应用模式，web应该和其他应用有点点区别
+		 */
 		configureHeadlessProperty();
+		/**
+		 * 创建SpringApplicationRunListeners
+		 */
 		SpringApplicationRunListeners listeners = getRunListeners(args);
+		/**
+		 * 执行SpringApplicationRunListeners 的starting方法。实际工作就是遍历SpringApplicationRunListeners中的
+		 * listener去发布ApplicationStartEvent
+		 */
 		listeners.starting();
 		try {
 			ApplicationArguments applicationArguments = new DefaultApplicationArguments(
 					args);
+			/**
+			 * 创建SpringApplication 应用的 environment
+			 */
 			ConfigurableEnvironment environment = prepareEnvironment(listeners,
 					applicationArguments);
+			/**
+			 * 配置 environment
+			 */
 			configureIgnoreBeanInfo(environment);
 			Banner printedBanner = printBanner(environment);
 			context = createApplicationContext();
@@ -313,6 +388,10 @@ public class SpringApplication {
 					new Class[] { ConfigurableApplicationContext.class }, context);
 			prepareContext(context, environment, listeners, applicationArguments,
 					printedBanner);
+			/**
+			 * 执行bean的实例化。
+			 *
+			 */
 			refreshContext(context);
 			afterRefresh(context, applicationArguments);
 			stopWatch.stop();
@@ -321,6 +400,9 @@ public class SpringApplication {
 						.logStarted(getApplicationLog(), stopWatch);
 			}
 			listeners.started(context);
+			/**
+			 * 执行继承了CommandLineRunner 、ApplicationRunner接口的bean，即随着应用一起启动
+			 */
 			callRunners(context, applicationArguments);
 		}
 		catch (Throwable ex) {
@@ -343,7 +425,15 @@ public class SpringApplication {
 			ApplicationArguments applicationArguments) {
 		// Create and configure the environment
 		ConfigurableEnvironment environment = getOrCreateEnvironment();
+		/**
+		 * 配置环境
+		 */
 		configureEnvironment(environment, applicationArguments.getSourceArgs());
+		/**
+		 * environment 创建后，通知listener处理。
+		 * 重要：listener中包含了BootstrapApplicationListener（在spring-cloud包中），在执行environmentPrepared，
+		 * 会去创建新的SpringApplication实例，加载xml中的bean信息。
+		 */
 		listeners.environmentPrepared(environment);
 		bindToSpringApplication(environment);
 		if (!this.isCustomEnvironment) {
@@ -412,10 +502,22 @@ public class SpringApplication {
 
 	private SpringApplicationRunListeners getRunListeners(String[] args) {
 		Class<?>[] types = new Class<?>[] { SpringApplication.class, String[].class };
+		/**
+		 * 同样是使用getSpringFactoriesInstances 函数，但是传入的types是SpringApplicationRunListener.class,
+		 * 得到的实例是EventPublishingRunListener，EventPublishingRunListener创建时会保存当前SpringApplication的
+		 * listener列表，当调用EventPublishingRunListener 发布事件时，其实就是调用SpringApplication的listener去处理事件
+		 *
+		 */
 		return new SpringApplicationRunListeners(logger, getSpringFactoriesInstances(
 				SpringApplicationRunListener.class, types, this, args));
 	}
 
+	/**
+	 * 根据 class type获取不同的class实例
+	 * @param type
+	 * @param <T>
+	 * @return
+	 */
 	private <T> Collection<T> getSpringFactoriesInstances(Class<T> type) {
 		return getSpringFactoriesInstances(type, new Class<?>[] {});
 	}
@@ -424,6 +526,17 @@ public class SpringApplication {
 			Class<?>[] parameterTypes, Object... args) {
 		ClassLoader classLoader = getClassLoader();
 		// Use names and ensure unique to protect against duplicates
+		/**
+		 * 根据class type 和类加载器加载获取指定的类，然后实例化，排序返回
+		 * 其中loadFactoryNames 根据类名，class load 获取类所在的路径（即jar包路径），
+		 * 然后加载/META-INF/spring.factories文件的相关内容
+		 *
+		 * 例如：如果初始化时传进来的是ApplicationContextInitializer.class,这个类属于spring-boot jar包中的类，
+		 * 所以会加载file:/E:/repository/org/springframework/boot/spring-boot/1.5.3.RELEASE/spring-boot-1.5.3.RELEASE.jar!/META-INF/spring.factories
+		 *这个文件的内容，根据这个文件中得到的className进行实例化
+		 *
+		 *
+		 */
 		Set<String> names = new LinkedHashSet<>(
 				SpringFactoriesLoader.loadFactoryNames(type, classLoader));
 		List<T> instances = createSpringFactoriesInstances(type, parameterTypes,
@@ -454,6 +567,11 @@ public class SpringApplication {
 		return instances;
 	}
 
+	/**
+	 * 如果environment不是null 则返回，如果是null则根据webApplicationType创建。当前项目使用的是web，
+	 * 所以创建的是StandardServletEnvironment。
+	 * @return
+	 */
 	private ConfigurableEnvironment getOrCreateEnvironment() {
 		if (this.environment != null) {
 			return this.environment;
@@ -770,6 +888,7 @@ public class SpringApplication {
 	 * Refresh the underlying {@link ApplicationContext}.
 	 * @param applicationContext the application context to refresh
 	 */
+	//AbstractApplicationContext 的refresh 执行bean 初始化、注册等
 	protected void refresh(ApplicationContext applicationContext) {
 		Assert.isInstanceOf(AbstractApplicationContext.class, applicationContext);
 		((AbstractApplicationContext) applicationContext).refresh();
@@ -1254,6 +1373,12 @@ public class SpringApplication {
 	 * @param primarySources the primary sources to load
 	 * @param args the application arguments (usually passed from a Java main method)
 	 * @return the running {@link ApplicationContext}
+	 */
+	/**
+	 * spring boot 主函数启动入口，记载bean、创建webContainer，启动应用
+	 * @param primarySources
+	 * @param args
+	 * @return
 	 */
 	public static ConfigurableApplicationContext run(Class<?>[] primarySources,
 			String[] args) {
